@@ -109,12 +109,13 @@
   * **input_points** Specify arg "input_points" for the name of the topic publishing the [sensor_msgs::PointCloud2](http://docs.ros.org/api/sensor_msgs/html/msg/PointCloud2.html) messages by RGB-D camera. 
   Default is "/camera/depth_registered/points" (topic compliant with [ROS OpenNI launch](http://wiki.ros.org/openni_launch))
   
-  * **aging_th** 跟踪队列长度　Specifiy tracking aging threshold, number of frames since last detection to deactivate the tracking. Default is 16.
+  * **aging_th** 检测次数间隔　Default is 16，因为检测一次之后, 会使用 tracker 来对矩框进行跟踪，检测频率过快，会对检测产生影响
   
   * **probability_th** 跟踪置信度　Specify the probability threshold for tracking object. Default is "0.5".
   ```bash
   roslaunch object_analytics_launch analytics_movidius_ncs.launch aging_th:=30 probability_th:="0.3"
   ```
+  
 ## 节点订阅的　传感器发布的话题
   RGB图像　object_analytics/rgb ([sensor_msgs::Image](http://docs.ros.org/api/sensor_msgs/html/msg/Image.html))
 
@@ -127,6 +128,7 @@
   跟踪信息 object_analytics/tracking ([object_analytics_msgs::TrackedObjects](https://github.com/intel/ros_object_analytics/tree/master/object_analytics_msgs/msg))
 
   检测信息(2d边框)object_analytics/detection ([object_msgs::ObjectsInBoxes](https://github.com/intel/object_msgs/tree/master/msg))
+  
 ## 消息类型
 object_msgs::Object
 
@@ -329,9 +331,12 @@ void ObjectUtils::copyPointCloud(const PointCloudT::ConstPtr& original, const st
          输入: 2d图像        rgb        input_rgb 
          输入: 2d检测分割结果 detection  input_2d 
          输出: 跟踪结果　　　 tracking　　output  
-         参数: 跟踪帧队列长度: aging_th：default="30"；
-         参数: 跟踪置信度: probability_th" default="0.5"
+         参数: 跟踪次数阈值:  aging_th：default="30"； // 被跟踪次数长度，年龄？？？，跟踪的次数越多，可能就越不准确===
+         参数: 跟踪置信度:    probability_th" default="0.5"
          object_analytics_nodelet/tracker/TrackingNodelet
+         
+         检测结果的每一个roi会用来初始化一个跟踪器。之后会跟踪后面的每一帧，直到下一个检测结果来到。
+         [detection, tracking, tracking, tracking, ..., tracking] [detection, tracking, tracking, tracking, ..., tracking]
          
 ## object_analytics_visualization 可视化
       5. 3d定位可视化　visualization3d　localization

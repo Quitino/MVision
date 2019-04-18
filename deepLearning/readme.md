@@ -11,10 +11,15 @@ Note: the project aims at imitating the well-implemented algorithms in [Deep Lea
 
 [TensorFlow 学习](http://antkillerfarm.github.io/ai/2017/08/21/tensorflow.html)
 
+[深度学习500问](https://github.com/Ewenwan/DeepLearning-500-questions)
 
 [参考博客](https://github.com/DragonFive/myblog/blob/master/source/_posts/DL-learningNote1.md)
 
 [吴恩达老师的深度学习课程笔记及资源](https://github.com/fengdu78/deeplearning_ai_books)
+
+[Deep Learning with Keras ](https://github.com/PacktPublishing/Deep-Learning-with-Keras/tree/master/Chapter07)
+
+[动手学深度学习 在线书籍 ](https://github.com/d2l-ai/d2l-zh)
 
 # 博客资源
 
