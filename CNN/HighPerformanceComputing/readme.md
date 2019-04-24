@@ -68,8 +68,8 @@
        原因是将问题转化为矩阵乘法后可以方便的使用很多矩阵运算库（如MKL、openblas、Eigen等）。
 [openblas](https://www.leiphone.com/news/201704/Puevv3ZWxn0heoEv.html)
        
-[GEMM 普通矩阵乘法（General Matrix Multiplication）](https://github.com/flame/how-to-optimize-gemm/wiki)
-       
+[GEMM 普通矩阵乘法（General Matrix Multiplication）多种优化](https://github.com/flame/how-to-optimize-gemm/wiki)
+     
        
     2、FFT变换。 
        时域卷积等于频域相乘，因此可将问题转化为简单的乘法问题。
@@ -98,15 +98,29 @@
 
 ![](https://static.leiphone.com/uploads/new/article/740_740/201704/58f08bf33fabd.png?imageMogr2/format/jpg/quality/90)
 
+BLAS是 Basic Linear Algebra Subprograms （基本线性代数子程序）的首字母缩写，主要用来做基础的矩阵计算，或者是向量计算。它分为三级：
+
+      BLAS 1级，主要做向量与向量间的dot或乘加运算，对应元素的计算；
+      BLAS 2级，主要做矩阵和向量，就类似PPT中蓝色部分所示，矩阵A*向量x， 得到一个向量y。除此之外，可能还会有对称的矩阵变形；
+      BLAS 3级，主要是矩阵和矩阵的计算，最典型的是A矩阵*B矩阵，得到一个C矩阵。由矩阵的宽、高，得到一个m*n的C矩阵。
+
+
 最原始3个for循环 (矩阵比较小的时候，速度还能快一些，当矩阵大了的时候，一定会跌下去,cache缓存问题):
 
 ![](https://static.leiphone.com/uploads/new/article/740_740/201704/58f08d87a8397.png?imageMogr2/format/jpg/quality/90)
 
-矩阵分块，块复用，减少仿存，相当于减少内存访问：
+矩阵分块，块复用，减少仿存，相当于减少内存访问，提高Cache利用率：
 
 ![](https://static.leiphone.com/uploads/new/article/740_740/201704/58f08dd7b16d4.png?imageMogr2/format/jpg/quality/90)
 
 ![](https://static.leiphone.com/uploads/new/article/740_740/201704/58f08e08680b9.png?imageMogr2/format/jpg/quality/90)
+
+核心汇编优化：
+
+* 寄存器分块
+* SIMD指令
+* 指令流水线优化，循环展开，重排，预取
+
 
 操作寄存器，不是操作内存：
 
