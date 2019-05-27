@@ -1,4 +1,19 @@
 # ARM_NEON_CNN编程
+[神经网络arm neon加速实现](https://blog.csdn.net/fuwenyan/article/details/78793907)
+
+[常用NEON 内置函数记录备用](https://blog.csdn.net/fuwenyan/article/details/78811034)
+
+[ARM Cortex系列(A8/A9/A15/A7) NEON多媒体处理SIMD引擎优化](https://blog.csdn.net/yxnyxnyxnyxnyxn/article/details/18267955)
+
+[aarch64 armv8 neon intrinsics 和内嵌汇编混用](https://github.com/Tencent/ncnn/wiki/aarch64-neon-intrinsics-%E5%92%8C%E5%86%85%E5%B5%8C%E6%B1%87%E7%BC%96%E6%B7%B7%E7%94%A8)
+
+[32位 armv7 neon intrinsics 和内嵌汇编混用](https://github.com/Tencent/ncnn/wiki/armv7-neon-intrinsics-%E5%92%8C%E5%86%85%E5%B5%8C%E6%B1%87%E7%BC%96%E6%B7%B7%E7%94%A8)
+
+[ARM NEON 社区](https://community.arm.com/cn/f/tags/NEON)
+
+[ARM平台NEON指令的编译和优化  编译选项](https://blog.csdn.net/heli200482128/article/details/79303286)
+
+[程序优化方法经验大全——神文](https://blog.csdn.net/STN_LCD/article/details/77606256)
 
 > 术语： 
 
@@ -26,7 +41,19 @@ ARM CPU最开始只有普通的寄存器，可以进行基本数据类型的基�
 SIMD即单指令多数据指令，目前在x86平台下有MMX/SSE/AVX系列指令，arm平台下有NEON指令。
 一般SIMD指令通过intrinsics(内部库C函数接口的函数) 或者 汇编 实现。
 
-Intrinsics是使用C语言的方式对NEON寄存器进行操作，因为相比于传统的使用纯汇编语言，具有可读性强，开发速度快等优势。如果需要在代码中调用NEON Intrinsics函数，需要加入头文件"arm_neon.h"。
+Intrinsics(内联函数)是使用C语言的方式对NEON寄存器进行操作，因为相比于传统的使用纯汇编语言，具有可读性强，开发速度快等优势。如果需要在代码中调用NEON Intrinsics函数，需要加入头文件"arm_neon.h"。
+
+NEON C内联函数（intrinsics）是由ARM定义的一组全新的数据类型和内联函数，便于使用C语言直接访问NEON单元。在C/C++程序中，内联函数就同普通函数一样，但在编译时，这些内联函数会直接映射为NEON提供的向量指令。当前GCC编译器和ARM编译器都支持相同的NEON内联语法，只需在程序中添加“arm_neon.h”头文件，就可以使用NEON内联函数。
+
+[ARM NEON常用 intrinsics 函数总结 !!!!](https://blog.csdn.net/may0324/article/details/72847800)
+
+**优势**：使用内联函数进行优化，开发人员无需关注寄存器分配和互锁等问题，这些都交由编译器处理，而且编写程序比较容易，优化后的性能相对较高。
+
+**不足**：目前内联函数所提供的功能和灵活性仍远远比不上汇编指令，并且经过编译器编译后，会反复加载／存取寄存器数据，导致系统时钟的浪费。 
+
+
+采用汇编语言进行NEON(**NEON 汇编（assembly）**)的最底层优化，可以使优化性能最大化，但汇编语言比较灵活，手写汇编程序对开发人员来说具有较大挑战，如果使用不恰当，反而会影响优化性能。
+
 
 ![](https://github.com/Ewenwan/MVision/blob/master/CNN/HighPerformanceComputing/img/simd.PNG)
 
@@ -1113,7 +1140,115 @@ uint64x2_t vabdl_u32(uint32x2_t a, uint32x2_t b); // VABDL.U32 q0,d0,d0
 ```c
 
 ```
+### 实例0：数组元素求和
+```c
+// c版本=======================
+#include <iostream>
+using namespace std;
 
+float sum_array(float *arr, int len)
+{
+    if(NULL == arr || len < 1)
+    {
+        cout<<"input error\n";
+        return 0;
+    }
+    float sum(0.0);
+    for(int i=0; i<len; ++i)
+    {
+        sum += *arr++;
+    }
+    return sum;
+}
+
+
+// arm intrinsics==============
+#include <iostream>
+#include <arm_neon.h> //需包含的头文件
+using namespace std;
+
+float sum_array(float *arr, int len)
+{
+    if(NULL == arr || len < 1)
+    {
+        cout<<"input error\n";
+        return 0;
+    }
+
+    int dim4 = len >> 2; // 数组长度除4整数
+    int left4 = len & 3; // 数组长度除4余数,不够4的剩下的
+    
+    float32x4_t sum_vec = vdupq_n_f32(0.0);//定义用于暂存累加结果的寄存器且初始化为0
+    for (; dim4>0; dim4--, arr+=4) //每次同时访问4个数组元素
+    {
+        float32x4_t data_vec = vld1q_f32(arr); //依次取4个元素存入寄存器vec
+        sum_vec = vaddq_f32(sum_vec, data_vec);//ri = ai + bi 计算两组寄存器对应元素之和并存放到相应结果
+    }
+    float sum = vgetq_lane_f32(sum_vec, 0)+vgetq_lane_f32(sum_vec, 1)+vgetq_lane_f32(sum_vec, 2)+vgetq_lane_f32(sum_vec, 3);//将累加结果寄存器中的所有元素相加得到最终累加值
+    for (; left4>0; left4--, arr++)
+        sum += (*arr) ;   //对于剩下的少于4的数字，依次计算累加即可
+    return sum;
+}
+```
+
+上述算法的时间复杂度时O(N/4) 
+从上面的例子看出，使用NEON函数很简单，只需要将依次处理，变为批处理（如上面的每次处理4个）。
+
+上面用到的函数有： 
+float32x4_t vdupq_n_f32 (float32_t value) 
+将value复制4分存到返回的寄存器中
+
+float32x4_t vld1q_f32 (float32_t const * ptr) 
+从数组中依次Load4个元素存到寄存器中
+
+相应的 有void vst1q_f32 (float32_t * ptr, float32x4_t val) 
+将寄存器中的值写入数组中
+
+float32x4_t vaddq_f32 (float32x4_t a, float32x4_t b) 
+返回两个寄存器对应元素之和 r = a+b
+
+相应的 有float32x4_t vsubq_f32 (float32x4_t a, float32x4_t b) 
+返回两个寄存器对应元素之差 r = a-b
+
+float32_t vgetq_lane_f32 (float32x4_t v, const int lane) 
+返回寄存器某一lane的值
+
+其他常用的函数还有：
+
+float32x4_t vmulq_f32 (float32x4_t a, float32x4_t b) 
+返回两个寄存器对应元素之积 r = a*b
+
+float32x4_t vmlaq_f32 (float32x4_t a, float32x4_t b, float32x4_t c) 
+乘加 r = a +b*c
+
+float32x4_t vmlsq_f32 (float32x4_t a, float32x4_t b, float32x4_t c) 
+乘减 r = a - b*c
+
+float32x4_t vextq_f32 (float32x4_t a, float32x4_t b, const int n) 
+拼接两个寄存器并返回从第n位开始的大小为4的寄存器 0<=n<=3 
+例如 
+
+	a: 1 2 3 4 
+	b: 5 6 7 8 
+	vextq_f32(a,b,1) -> r: 2 3 4 5 
+	vextq_f32(a,b,2) -> r: 3 4 5 6 
+	vextq_f32(a,b,3) -> r: 4 5 6 7
+	
+```c
+float32x4_t sum = vdupq_n_f32(0); // sum四个通道全部赋值为0，sum={0,0,0,0}
+float _a[] = {1,2,3,4}, _b[] = {5,6,7,8} ;
+float32x4_t a = vld1q_f32(_a), b = vld1q_f32(_b)  ;// 载入两个数组元素到 两个寄存器
+
+//a的元素乘以b的第几个通道元素，然后后面的累加
+float32x4_t sum1 = vfmaq_laneq_f32(sum, a, b, 0);  // sum1={5,10,15,20}
+float32x4_t sum2 = vfmaq_laneq_f32(sum1, a, b, 1); 
+// sum2={5,10,15,20}+{6,12,18,24} = {11,22,33,44}
+
+float32x4_t sum3 = vfmaq_laneq_f32(sum2, a, b, 2);
+// sum3={11,22,33,44}+{7,14,21,28} = {18,36,54,72}
+```
+
+[官方文档 其他常用函数](https://developer.arm.com/architectures/instruction-sets/simd-isas/neon/intrinsics)
 
 ### 示例1：向量加法**
 ```c
@@ -1547,19 +1682,49 @@ int dot(char* A,char* B,int K)
     return sum;
 }
 ```
+### 示例8：3x3  pool 池化代码 最大值/均值池化
 
+```c
+// 先分别读取三列
+constexpr const int pool_size = 3;
+const float32x4_t top_data    = vld1q_f32(reinterpret_cast<const float *>(input_top_ptr + input.offset()));
+const float32x4_t middle_data = vld1q_f32(reinterpret_cast<const float *>(input_middle_ptr + input.offset()));
+const float32x4_t bottom_data = vld1q_f32(reinterpret_cast<const float *>(input_bottom_ptr + input.offset()));
 
+float32x2_t       res         = {};
+if(pooling_type == PoolingType::AVG)
+{// 均值池化=============
+   // Calculate scale
+   float scale = calculate_avg_scale(id, pool_size, upper_bound_w, upper_bound_h, pool_pad_x, pool_pad_y, pool_stride_x, pool_stride_y);
+   const float32x2_t scale_v = vdup_n_f32(scale);// 寄存器 初始化为 scale 2个32位
 
+   // Perform pooling
+   const float32x4_t sum_data = vaddq_f32(vaddq_f32(top_data, bottom_data), middle_data);
+   res = vpadd_f32(vget_high_f32(vsetq_lane_f32(0.f, sum_data, 3)), vget_low_f32(sum_data));
+   res  = vmul_f32(vpadd_f32(res, res), scale_v);// 得到4个最大的float 
+}
+else
+{// 最大值池化
+   const float32x4_t max_data = vmaxq_f32(vmaxq_f32(top_data, bottom_data), middle_data);
+   res = vpmax_f32(vget_high_f32(vsetq_lane_f32(-std::numeric_limits<float>::max(), max_data, 3)), vget_low_f32(max_data));
+   res = vpmax_f32(res, res);
+}
 
+*(reinterpret_cast<float *>(output.ptr())) = vget_lane_f32(res, 0);
+
+```
 ## 4. NEON assembly
+
+采用汇编语言进行NEON(**NEON 汇编（assembly）**)的最底层优化，可以使优化性能最大化，但汇编语言比较灵活，手写汇编程序对开发人员来说具有较大挑战，如果使用不恰当，反而会影响优化性能。
 
 NEON可以有两种写法：
 * 1. Assembly文件： 纯汇编文件，后缀为”.S”或”.s”。注意对寄存器数据的保存。
 * 2. inline assembly内联汇编
 
-### 1.纯汇编 Assembly
+在C/C++程序中编写汇编代码主要有两种形式：汇编函数或内联汇编。汇编函数中，需要声明代码段、操作堆栈等，过于复杂。而编写内联汇编，在C代码中需要以“asm”关键字标识，并在asm（）编写汇编语句。这种方法只需要在待优化部分局部采用汇编语言实现，相对简单。
 
-#### 数据加载保存移动
+
+### 数据加载保存移动
 
 > **扩展 寄存器 加载和存储 指令**
 
@@ -1714,7 +1879,7 @@ VMVN{cond}{.datatype} Qd, Qm
 VMVN{cond}{.datatype} Dd, Qm
 ```
 
-#### NEON 乘法指令
+### NEON 乘法指令
 
 VMUL（向量乘法））将两个向量中的相应元素相乘，并将结果存放到目标向量中。
 VMLA（向量乘加）将两个向量中的相应元素相乘，并将结果累加到目标向量的元素中。
@@ -1728,8 +1893,10 @@ VopL{cond}.datatype Qd, Dn, Dm
 
 
 
-### 2.内联汇编 inline assembly
+### 内联汇编 inline assembly
 [ARM GCC Inline Assembler Cookbook](http://www.ethernut.de/en/documents/arm-inline-asm.html)
+
+[博客参考](https://blog.csdn.net/dahailantian1/article/details/78584920)
 
 优点：在C代码中嵌入汇编，调用简单，无需手动存储寄存器；
 缺点：有较为复杂的格式需要事先学习，不好移植到其他语言环境。
@@ -1744,14 +1911,14 @@ VopL{cond}.datatype Qd, Dn, Dm
 void add_float_neon2(int* dst, int* src1, int* src2, int count)
 {
 	asm volatile (
-		"1: \n"
-		"vld1.32 {q0}, [%[src1]]! \n"
+		"1: \n"                        // 用于构成循环的标记号
+		"vld1.32 {q0}, [%[src1]]! \n"  // 从src地址处载入4个32位的浮点数 地址递增
 		"vld1.32 {q1}, [%[src2]]! \n"
-		"vadd.f32 q0, q0, q1 \n"
-		"subs %[count], %[count], #4 \n"
-		"vst1.32 {q0}, [%[dst]]! \n"
-		"bgt 1b \n"
-		: [dst] "+r" (dst)
+		"vadd.f32 q0, q0, q1 \n"       // q0 = q0 +q1
+		"subs %[count], %[count], #4 \n"// 循环计数count = count-4
+		"vst1.32 {q0}, [%[dst]]! \n"   // 将运算结果存储到目标地址，目标地址递增
+		"bgt 1b \n"                    // 如果count>0,跳转到标记号1处继续执行
+		: [dst] "+r" (dst)             // 可写
 		: [src1] "r" (src1), [src2] "r" (src2), [count] "r" (count)
 		: "memory", "q0", "q1"
 	);
@@ -1776,11 +1943,38 @@ void add_float_neon2(int* dst, int* src1, int* src2, int count)
 * 一定要多测试不同指令的处理时间！！原因是你所想跟实际有出入，且不同的编译器优化的效果可能也有些不同；
 * 一定要有一定的计算机体系结构基础，对存储结构、流水线有一定的体会！！
 
-总结一下NEON优化就是：
+〉 **总结一下NEON优化就是：**
+
 * 第一优化算法实现流程；
 * 第二优化程序存取；
 * 第三优化程序执行；
 * 第四哪儿能优化，就优化哪儿
+
+〉 **需要注意的地方**
+
+   1. load数据的时候，第一次load会把数据放在cache里面，只要不超过cache的大小，下一次load同样数据的时候，则会比第一次load要快很多，会直接从cache中load数据，这样在汇编程序设计的时候是非常需要考虑的问题。
+
+   如：求取一个图像的均值，8*8的窗口，先行求和，然后列求和出来均值，这时候会有两个函数，数据会加载两遍，如果按照这样去优化的话则优化不了多少。如果换成上面这种思路，先做行16行，然后再做列，这样数据都在cache里面，做列的时候load数据会很快。
+
+   在做neon乘法指令的时候会有大约2个clock的阻塞时间，如果你要立即使用乘法的结果，则就会阻塞在这里，在写neon指令的时候需要特别注意。乘法的结果不能立即使用，可以将一些其他的操作插入到乘法后面而不会有时间的消耗。
+
+如：vmul.u16 q1, d3, d4 
+
+         vadd.u32 q1, q2, q3
+
+此时直接使用乘法的结果q1则会阻塞，执行vadd需要再等待2个clock的时间
+
+使用饱和指令的时候，如乘法饱和的时候，在做乘法后会再去做一次饱和，所以时间要比直接做乘法要慢。
+
+如：  vmul.u16 q1, d3, d4
+
+          vqmul.u32 q1, q2, q3
+
+后一个的时间要比第一个的时间要久。
+
+在对16位数据进行load或者store操作的时候，需要注意的是字节移位。比如是16位数据，则load 8个16位数据，如果指定寄存器进行偏移，此时需要特别注意。
+
+例如：vld1.64 {d0}, [r0], r1
 
 
 ## 内联汇编使用心得
@@ -1795,7 +1989,12 @@ output/input registers的写法一定要写对，clobber list也一定要写完�
 一般情况下建议的写法举例：
 ```asm
 asm volatile (
-	... /* assembly code */
+	... /* assembly code 汇编代码 */
+	// 所有的汇编代码必须用双引号括起来。
+        // 如果有多行汇编代码的话，每一条语句都要用双引号括起来，并且在代码后面要加上换行符（“\n”或者“\n\t”）。
+	
+	// "[modifier修改符 可选]constraint限定符" (C expression C语言表达式)
+	// 修改符和限定符要用双引号括起来，而C表达式要用括号括起来。
 	: "+r"(arg0) // %0
 	  "+r"(arg1) // %1 // 输入寄存器 Output Registers
 	: "r"(arg2)  // %2 // 输入寄存器 Input Registers
@@ -1803,10 +2002,102 @@ asm volatile (
 );
 ```
 
+> **限定符**
+
+	限定符   在ARM指令集下              在Thumb指令集下
+	f         浮点寄存器f0...f7              N/A
+	h         N/A                           寄存器r8...r15
+	G         浮点常量立即数                 N/A
+	H         和G作用相同                    N/A
+	I         数据处理指令中用到的立即数      范围为0...255的常量
+	J         范围为-4095...4095的索引常量    范围为-255...-1的常量
+	K         和I作用相同                    和I作用相同
+	L         和I作用相同                    范围为-7...7的常量
+	l         和r作用相同                    寄存器r0...r7
+	M         范围为0.32或者是2的幂次方的常量  范围为0...1020的4的倍数的常量
+	m         内存地址memory                 内存地址
+	N         N/A                           范围为0...31的常量
+	O         N/A                           范围为 -508...508 的4的倍数的常量
+	r         通用寄存器r0...r15             N/A
+	w         向量浮点寄存器s0...s31         N/A
+	X         任何类型的操作数               任何类型的操作数
+        
+	数字 0，1，2，3，... 指代前面定义的操作数
+	
+是常用的也就是r，f和m等几个。
+
+> **修改符**
+
+修改符是加在限定符之前的，并且是可选的，如果没有修改符的话，则表明这个操作数是只读的。
+
+这个对输入操作数没有问题，但是对输出操作数来说，肯定是需要被修改的，那怎么办呢？
+
+答案就是使用修改符，修改这个操作数的属性。目前，GCC中定义了三个修改符，分别是：
+
+	修改符    含义
+	=        只写 操作数，通常用于输出操作数中
+	+        可读 且 可写 操作数，必须要列在输出操作数中
+	&        寄存器只能用于输出(不能作为输入寄存器)
+	
+所以，作为输出操作数，只需要在限定符前加上“=”就可以了。
+
+如果想让一个C变量既作为输入操作数，也作为输出操作数的话，可以使用“+”限定符，并且这个操作数只需要在输出操作数列表中列出就行了。例如:
+
+```asm
+__asm__(
+        "mov %0, %0, ror #1"   
+        : "+r" (y)  
+        );  
+```
+是将变量y中的值右移1位。因为输入和输出操作数是一个，所以该操作数要既可读也可写，因此添加了“+”修改符。
+
+其实，在限定符中，也可以使用数字，其作用是指代前面定义的操作数，0代表第一个，1代表第二个，以此类推。
+
+
+```asm
+__asm__(
+        "mov %0, %0, ror #1"   
+        : "=r" (y)  
+        : "0" (y)  
+        );  
+```
+// 这个例子的效果和前面的例子是相同的。本例不同的是，先定义了一个可写的输出变量，同时在输入变量列表中，明确用数字0指出了前面定义的第一个操作数同时也要用来作为输入操作数。
+
+
+使用“&”修改符，明确告诉编译器，代表输出操作数的寄存器一定不能使用输入操作数已经使用过的寄存器。下面举个例子：
+
+如果汇编代码中有输入寄存器还没有使用完毕，就对输出操作数进行修改的情况，则特别需要用“&”修改符，保证不复用。
+
+```asm
+__asm__ __volatile__(
+                 "ldr %0, [%1]\n\t"  
+                 "str %2, [%1, #4]"  
+                 : "=&r" (rdv)  
+                 : "r" (&table), "r" (wdv)  
+                 : "memory");  
+
+```
+本例中，将操作一个table数组，读出它的第一个数存放到rdv中，然后修改第二个数为wdv中存放的值。乍看一下没什么问题，但是如果编译器用同一个寄存器来表示输入操作数&table（%1）和输出操作数rdv（%0）怎么办呢？执行完第一条语句之后，table数组的地址就被修改掉了。所以，可以在输出操作数中加上一个“&”修改符，强制保证输出操作数不能和输入操作数复用同一个寄存器，这个问题就解决了
+
+> **修改寄存器列表**
+
+在汇编指令中，有可能会用到一些指定的寄存器，但是在执行你定义的汇编程序时，那个指定的寄存器有可能另有别的用途，存放了非常重要的数据。等你的程序执行完成后，那个寄存器的值已经被你修改过了，肯定会造成执行错误。因此，在执行你的程序之前必须要做必要的备份和恢复的动作。但是，编译器并不会分析你的汇编代码，找出这种被你修改过，需要恢复的寄存器，因此你必须显式的告诉编译器，被你修改过的寄存器有哪些。这就是修改寄存器列表所起到的作用。
+
+对于嵌入内联ARM汇编来说，此列表中的值有下面三种类型：
+
+	类型           作用
+	r0...r15     告诉编译器汇编代码中 修改了通用寄存器r0...r15
+	cc           告诉编译器汇编代码 会 导致 CPU状态位 的 改变
+	memory       告诉编译器汇编代码 会 读取或修 改内存中某个地址 存放的值
+
+对于“memory”来说，它并不是表示寄存器被读取或修改了，而是表示内存中的值被修改了。出于优化的目的，在执行你的汇编代码之前，编译器将某些变量的值还保存在寄存器中，并没有被写到实际的内存中。但是，如果你的汇编代码会读取内存中的值，则很有可能新的值还在寄存器中，而内存中存放的还是老的值，这样就会造成错误。添加了“memory”之后，编译器会在执行你的代码之前，保证将保存在寄存器中，没有更新到内存中的值全部都写入到内存中。
+
+此列表中的每一项都要用双引号（""）括起来，每项之间要用逗号（“,”）分割。 
+
 ## ARM NEON CNN卷积网络优化 深度学习优化 实例
 [参考NCNN](https://github.com/Ewenwan/MVision/blob/master/CNN/HighPerformanceComputing/example/ncnn_%E6%BA%90%E7%A0%81%E5%88%86%E6%9E%90.md)
 
-### 1.绝对值 arm_neon_v7 neon_v8 优化
+### 1.绝对值 AbsVal arm_neon_v7 neon_v8 优化
 ```c
 //  arm 内联汇编
 // asm(
@@ -1816,8 +2107,20 @@ asm volatile (
 // : 被更改资源列表
 // );
 // __asm__　__volatile__(); 
+
+// 关键字“__asm__”，其实也可以写成“asm”。但是“asm”并不是所有版本的GCC编译器都支持的，
+// 而且有可能和程序中别的地方定义的变量或函数名冲突，所以用“__asm__”的话，兼容性会好一点。
+
 // __volatile__或volatile 是可选的，假如用了它，则是向GCC 声明不答应对该内联汇编优化，
 // 否则当 使用了优化选项(-O)进行编译时，GCC 将会根据自己的判定决定是否将这个内联汇编表达式中的指令优化掉。
+
+// 作用是禁止编译器对后面编写的汇编指令再进行优化。一般情况下，自己写的汇编代码肯定是自己进行设计优化过了的，
+// 如果编译器再进行优化的话，很有可能效果还不如不优化，而且也有可能会出现奇怪的错误，所以通常都会带上这个关键字。
+// 同样，“__volatile__”也可以写成“volatile”，但可能兼容性会没那么好。
+
+#if __ARM_NEON
+#include <arm_neon.h>
+#endif // __ARM_NEON
 
 // 换行符和制表符的使用可以使得指令列表看起来变得美观。
 int AbsVal_arm::forward_inplace(Mat& bottom_top_blob) const
@@ -1836,7 +2139,7 @@ int AbsVal_arm::forward_inplace(Mat& bottom_top_blob) const
 // 如果支持ARM_NEON 则使用NEOB进行优化
 #if __ARM_NEON
         int nn = size >> 2;// 128位的寄存器，一次可以操作 4个float32位,剩余不够4个的，最后面直接c语言执行
-                           // 左移两位相当于除以4
+                           // 右移两位相当于除以4
         int remain = size - (nn << 2);// 4*32 =128字节对其后 剩余的 float32个数, 剩余不够4个的数量
         
 #else
@@ -1865,6 +2168,11 @@ v8:
   "ld1    {v0.8h, v1.8h}, [%2], #32     \n"
   "ld1    {v0.4h, v1.4h}, [%2], #32     \n"             // 4h 表示int16
 
+
+所有的汇编代码必须用双引号括起来。如果有多行汇编代码的话，每一条语句都要用双引号括起来，并且在代码后面要加上换行符（“\n”或者“\n\t”）。
+
+这样做是因为GCC会将汇编代码部分作为字符串形式直接传给汇编器，加上换行符后，汇编器就能准确知道哪些字符串表示的是一条汇编语句。同时，为了增加可读性，每条汇编语句都可以换行。
+
 */
         
 // 优化过程
@@ -1879,18 +2187,25 @@ v8:
             "ld1        {v0.4s}, [%1]         \n" // 载入 ptr 指针对应的值，连续4个
             "fabs       v0.4s, v0.4s          \n" // ptr 指针对应的值 连续4个，使用fabs函数 进行绝对值操作 4s表示浮点数
             "subs       %w0, %w0, #1          \n" // %0 引用 参数 nn 操作次数每次 -1  #1表示1
+	                                          // 
             "st1        {v0.4s}, [%1], #16    \n" // %1 引用 参数 ptr 指针 向前移动 4*4=16字节
+	                                          // store 1, {v0.4s} 计算绝对值后 再存入 [%1]?
             "bne        0b                    \n" // 如果非0，则向后跳转到 0标志处执行
-            
+	    
+            // BNE指令会去查看状态寄存器,当Z!=0的时候就跳转到指定位置.
+            // BEQ功能与BNE刚好相反,Z==0的时候才跳转到指定位置.
+
             // 每个操作数的寄存器行为 “=”，表示此操作数类型是只写，即输出寄存器。
+	    // "[modifier修改符可选]constraint限定符" (C expression C语言表达式) 
             : "=r"(nn),     // %0 操作次数 nn  循环变量
               "=r"(ptr)     // %1 引用参数 ptr 数据内存地址指针
             
              // 数据 标签标识 nn 标识为0  ptr标识为1
+	     // 使用百分号（“%”）后面接一个数字，0表示定义的第一个操作数，1表示定义的第二个操作数，依次类推。
             : "0"(nn),  
               "1"(ptr)
             // 寄存器变化表　list of clobbered registers  
-            : "cc", "memory", "v0" // v0寄存器，内存memory，cc??可能会变化
+            : "cc", "memory", "v0" // v0寄存器，内存memory， cc CPU状态位 可能会变化
         );
         }
 #else
@@ -1900,10 +2215,14 @@ v8:
         {
         asm volatile(
             "0:                             \n" // 0: 作为标志，局部标签
-            "vld1.f32   {d0-d1}, [%1]       \n" // %1处为ptr标识为1标识,即数据地址，
-            "vabs.f32   q0, q0              \n" // q0寄存器 = [d1 d0]，128位寄存器，取出四个 float 单精度浮点数
+            "vld1.f32   {d0-d1}, [%1]       \n" // %1处为ptr标识为1标识,即数据地址
+	                                        // IA 表示在每次传送后递增地址。IA 是缺省值，可以省略。？？
+            "vabs.f32   q0, q0              \n" // q0寄存器 = [d1 d0]，128位寄存器，取出四个 float 单精度浮点数 进行绝对值计算 后 写入
             "subs       %0, #1              \n" // %0为 循环变量nn标识，标识循环次数-1  #1表示1
-            "vst1.f32   {d0-d1}, [%1]!      \n" // ??????
+            "vst1.f32   {d0-d1}, [%1]!      \n" // 存储 store1 经过绝对值运算后的寄存器的值 存入原内存中
+	                                        // !感叹号作用? 指针 [%1] 前移16字节??
+						// ! 指定必须将更新后的基址([%1]递增16)写回到 [%1] 中
+						
             "bne        0b                  \n" // 如果非0，则向后跳转到 0标志处执行
             // 每个操作数的寄存器行为 “=”，表示此操作数类型是只写，即输出寄存器。
             : "=r"(nn),     // %0
@@ -1912,7 +2231,7 @@ v8:
             : "0"(nn),
               "1"(ptr)
             // 寄存器变化表　list of clobbered registers  
-            : "cc", "memory", "q0"// q0寄存器，内存memory，cc??可能会变化
+            : "cc", "memory", "q0"// q0寄存器，内存memory， cc CPU状态位 可能会变化 
         );
         }
 #endif // __aarch64__
@@ -1931,4 +2250,189 @@ v8:
 
 ```
 
+### 2. BN层 通道数据归一化 BatchNorm
 
+```c
+// load_model() 函数预处理===============
+
+    // 去均值 归一化 合在一起=============
+    // 各个通道均值 mean_data = sum(xi)/m
+    // 各个通道方差 var_data     = sum((xi - mean_data)^2)/m
+    // xi‘ = ( xi - mean_data )/(sqrt(var_data + eps))  // 去均值，除以方差，归一化
+    
+    // yi = slope_data * xi'  + bias_data  //  缩放 + 平移=====
+    
+    // 写成一起=====================
+    // yi = slope_data / (sqrt(var_data + eps)) * xi  + bias_data - slope_data*mean_data/(sqrt(var_data + eps)) 
+    // b = slope_data / (sqrt(var_data + eps)) = slope_data /sqrt_var;
+    // a = bias_data - slope_data*mean_data/(sqrt(var_data + eps)) = bias_data - slope_data*mean_data/sqrt_var;
+    
+    // yi = b * xi + a
+    
+    
+int BatchNorm_arm::forward_inplace(Mat& bottom_top_blob, const Option& opt) const
+{
+    int dims = bottom_top_blob.dims;
+    
+    if (dims != 3) // 只有三通道的特征图才使用 neon加速
+        return BatchNorm::forward_inplace(bottom_top_blob, opt);
+
+    // a = bias - slope * mean / sqrt(var)
+    // b = slope / sqrt(var)
+    // value = b * value + a
+
+    int w = bottom_top_blob.w;// 特征图宽度
+    int h = bottom_top_blob.h;// 特征图高度
+    int size = w * h;// 一张特征图尺寸
+
+// 整合后的变化系数  yi = b * xi + a
+    const float* a_data_ptr = a_data; // batchnorm.h 中公开的 Mat矩阵数据，数组首地址
+    const float* b_data_ptr = b_data;
+    
+    #pragma omp parallel for num_threads(opt.num_threads)
+    for (int q=0; q<channels; q++)// 遍历每个通道
+    {
+        float* ptr = bottom_top_blob.channel(q);// 每一个通道的 特征图 数据 首地址
+ // 每通道 的 变化系数==都一样=
+        float a = a_data_ptr[q];
+        float b = b_data_ptr[q];
+
+#if __ARM_NEON
+        int nn = size >> 2; // 128位寄存器一个可以操作 4个 32位浮点数，所以总数除以4得到 寄存器操作次数
+	                    // 右移动2位，相当于除以4，例如 10，右移两位相当于乘除4，得到2
+        int remain = size - (nn << 2);// 10-2*4=2 剩余2个 不够4，使用普通c语言版本
+#else
+        int remain = size; // 如果不支持neon，则全部使用 普通c语言计算呢
+#endif // __ARM_NEON
+
+#if __ARM_NEON
+#if __aarch64__
+        if (nn > 0)
+        {
+        asm volatile(
+            "dup        v1.4s, %w4             \n" // 每通道的 变化系数a,b都一样只需载入一次，传入的为立即数使用dup
+            "dup        v2.4s, %w5             \n" // v1存储a，v2存储b，v0存储特征数据，v3存储变化的数据地址以及a
+            "0:                                \n" // 构成循环的标记号
+            "prfm       pldl1keep, [%1, #128]  \n" // 从%1 ptr 处预读取 128字节 4*32 4个浮点数
+            "ld1        {v0.4s}, [%1]          \n" // 载入 ptr 指针对应的值到 v0，连续4个float
+            "orr        v3.16b, v1.16b, v1.16b \n" // v1 --> v3,  v3 =a
+            "fmla       v3.4s, v0.4s, v2.4s    \n" // 特征数据v0*缩放v2 + 偏置v3 最后赋值给 v3 += v0×b
+            "subs       %w0, %w0, #1           \n" // %0 为nn 执行次数 -1   #1   为1
+            "st1        {v3.4s}, [%1], #16     \n" // 结果v3 store存储到 原数据地址处，原数据地址递增16字节
+            "bne        0b                     \n" // 不为零跳回去，继续循环
+            : "=r"(nn),     // %0
+              "=r"(ptr)     // %1
+            : "0"(nn),      // 2 ???=====
+              "1"(ptr),     // 3 ???=====
+              "r"(a),       // %4 存入寄存器 只读, 不变, 参数 偏置a
+              "r"(b)        // %5 存入寄存器 只读, 不变，参数 缩放归一化系数
+            : "cc", "memory", "v0", "v1", "v2", "v3"
+	    //  cc CPU状态位，内存memory，v，v1，v2，v3寄存器 可能会变化
+        );
+        }
+#else
+        if (nn > 0)
+        {
+        asm volatile(
+            "vdup.f32   q1, %4              \n"// 每通道的 变化系数a,b都一样只需载入一次，传入的为立即数使用dup
+            "vdup.f32   q2, %5              \n"// q1存储变量 a,q2存储变量b，q0存储特征值
+	                                       // q3存储中间变量，先存储a和b以及q0执行乘加后，存储最终的结果
+					       // 最后把 在q3中的结果 存储回原 特征数据地址处
+					       
+            "0:                             \n"// 构成循环的标记号
+            "pld        [%1, #128]          \n"// 从%1 ptr 处预读取 128字节 4*32 4个浮点数
+            "vld1.f32   {d0-d1}, [%1 :128]  \n"// 从%1 ptr 处载入 4个浮点数到q0，传入的为指针，使用ld
+            "vorr.32    q3, q1, q1          \n"// q3 = q1 或 q1 = 变量a
+            "vmla.f32   q3, q0, q2          \n"// q3 += q0(特征值)*q2(变量b), 乘加运算
+            "subs       %0, #1              \n"// 循环次数 nn -1
+            "vst1.f32   {d6-d7}, [%1 :128]! \n"// q3->{d6-d7} 结果值 顺序store到 原特征值地址处[%1]
+	                                       // !感叹号，强制[%1]向后跳转128位 
+            "bne        0b                  \n"// 不为零跳回去，继续循环 
+	    
+            : "=r"(nn),     // %0 循环次数(按寄存器一次并行运算4个浮点数数) nn 
+              "=r"(ptr)     // %1 特征值数据地址
+            : "0"(nn),      // 2 ???===
+              "1"(ptr),     // 3 ???===
+              "r"(a),       // %4
+              "r"(b)        // %5
+            : "cc", "memory", "q0", "q1", "q2", "q3"
+	    //  cc CPU状态位，内存memory，q0，q1，q2，q3寄存器 可能会变化
+        );
+        }
+#endif // __aarch64__
+#endif // __ARM_NEON
+        for (; remain>0; remain--)
+        {
+            *ptr = b * *ptr + a;// 剩余不够 4个的 直接c语言执行
+
+            ptr++;// 数据地址增加 1
+        }
+    }
+    return 0;
+}    
+    
+
+```
+
+### 3.添加偏置类 bias
+
+```c
+// 进行运算： y = x + bias ---> x
+
+int Bias_arm::forward_inplace(Mat& bottom_top_blob, const Option& opt) const
+{
+    int w = bottom_top_blob.w;// 特征图宽度
+    int h = bottom_top_blob.h;// 特征图高度
+    int channels = bottom_top_blob.c;// 通道数量（特征 图 厚度，汉堡包层数）
+    int size = w * h;// 单通道特征尺寸
+
+    const float* bias_ptr = bias_data; // 偏置数据 指针 在 bias.h 中定义的 public公开数据
+    
+    #pragma omp parallel for num_threads(opt.num_threads)// omp并行执行
+    
+    for (int q=0; q<channels; q++)// 遍历每个通道
+    {
+        float* ptr = bottom_top_blob.channel(q);// 每个通道数据起始指针 (原有特征数据)
+
+        float bias = bias_ptr[q];// 每通道偏置参数一样
+
+#if __ARM_NEON
+        int nn = size >> 2; // 128位寄存器一个可以操作 4个 32位浮点数，所以总数除以4得到 寄存器操作次数
+	                    // 右移动2位，相当于除以4，例如 10，右移两位相当于乘除4，得到2
+        int remain = size - (nn << 2);// 剩余不够4个的数量 1～3
+#else
+        int remain = size;
+#endif // __ARM_NEON
+
+#if __ARM_NEON
+// 这里 直接使用了 neon Instrinsic 内在函数，不过优化程度不如 汇编代码
+
+        float32x4_t _bias = vdupq_n_f32(bias);// 偏置数据 dup载入到 寄存器 4个32位的浮点数
+	                                      // 传入的为 立即数
+        for (; nn>0; nn--)
+        {
+            float32x4_t _p = vld1q_f32(ptr);// 载入 特征值 传入的为 数据的地址 
+            float32x4_t _outp = vaddq_f32(_p, _bias);// 加上偏置_bias
+            vst1q_f32(ptr, _outp);                   // 从寄存器数据 设置内存数据 store1存储结果数据到ptr
+
+            ptr += 4;// 特征指针 移动四个单位
+        }
+	
+// 可以试写 neon内联汇编代码，区分v8 、v7===============
+	
+#endif // __ARM_NEON
+
+        for (; remain>0; remain--)
+        {
+            *ptr = *ptr + bias; // 普通c 版本 加上偏置
+
+            ptr++;
+        }
+    }
+
+    return 0;
+}
+
+
+
+```
